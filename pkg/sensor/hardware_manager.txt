@@ -1,0 +1,62 @@
+package sensor
+
+import (
+	"log"
+	"peerdrive/app/pkg/hardware"
+	"peerdrive/app/pkg/models"
+)
+
+// HardwareSensorManager is the real implementation of the Manager interface.
+// It uses a hardware manager to get raw data and a parser to make sense of it.
+type HardwareSensorManager struct {
+	hwManager hardware.Manager
+	stopChan  chan struct{}
+}
+
+// NewHardwareSensorManager creates a new instance of the real sensor manager.
+// It requires a hardware.Manager to communicate with the physical device.
+func NewHardwareSensorManager(hw hardware.Manager) *HardwareSensorManager {
+	return &HardwareSensorManager{
+		hwManager: hw,
+		stopChan:  make(chan struct{}),
+	}
+}
+
+func (m *HardwareSensorManager) StopTracking() {
+	close(m.stopChan)
+}
+
+func (m *HardwareSensorManager) StartTracking() (<-chan models.VehicleState, error) {
+	vehicleStateChan := make(chan models.VehicleState)
+	rawDataChan, err := m.hwManager.Start()
+	if err != nil {
+		return nil, err
+	}
+
+	go func() {
+		defer close(vehicleStateChan)
+		for {
+			select {
+			case rawData, ok := <-rawDataChan:
+				if !ok {
+					// Hardware channel was closed.
+					return
+				}
+
+				// Parse the raw data into a structured VehicleState.
+				state, err := ParseDataToVehicleState(rawData)
+				if err != nil {
+					log.Printf("Error parsing sensor data: %v", err)
+					continue // Skip this bad data point
+				}
+				vehicleStateChan <- state
+
+			case <-m.stopChan:
+				m.hwManager.Stop()
+				return
+			}
+		}
+	}()
+
+	return vehicleStateChan, nil
+}
