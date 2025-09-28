@@ -26,7 +26,7 @@ type MainWindow struct {
 	window        fyne.Window
 	handlers      *commands.CommandHandlers
 	ctx           context.Context
-	outputText    *widget.RichText
+	outputText    *widget.Entry
 	peerAddrLabel *widget.Label
 	roadMap       *widgets.RoadMapWidget
 	netManager    *network.MeshNetworkManager // Add reference to network manager
@@ -150,9 +150,10 @@ func (mw *MainWindow) createButtonsSection() fyne.CanvasObject {
 
 // createOutputSection creates the output display area
 func (mw *MainWindow) createOutputSection() fyne.CanvasObject {
-	mw.outputText = widget.NewRichText()
+	mw.outputText = widget.NewMultiLineEntry()
 	mw.outputText.Wrapping = fyne.TextWrapWord
-	mw.appendOutput("🚀 PeerDrive UI started. Ready for commands!")
+	mw.outputText.SetText("🚀 PeerDrive UI started. Ready for commands!\n")
+	mw.outputText.Disable() // Make it read-only but still selectable
 
 	// Create scrollable container for output
 	outputScroll := container.NewScroll(mw.outputText)
@@ -258,11 +259,12 @@ func (mw *MainWindow) handleRedeem() {
 }
 
 func (mw *MainWindow) handleClear() {
-	mw.outputText.ParseMarkdown("")
-	mw.appendOutput("🧹 Output cleared!")
+	mw.outputText.SetText("🧹 Output cleared!\n💡 Ready for next command...\n")
 }
 
 func (mw *MainWindow) handleRefresh() {
+	mw.clearAndStartOutput("Refresh Peer Info")
+
 	peerAddr := mw.handlers.GetPeerAddress()
 	mw.peerAddrLabel.SetText(fmt.Sprintf("Peer Address: %s", peerAddr))
 
@@ -270,20 +272,24 @@ func (mw *MainWindow) handleRefresh() {
 	minX, minY, maxX, maxY := mw.roadMap.GetWorldBounds()
 	mapInfo := fmt.Sprintf("🗺️ Map bounds: (%.1f,%.1f) to (%.1f,%.1f) | Vertical roads: 0-0.4, 0.8-1.2, 1.6-2.0", minX, minY, maxX, maxY)
 
-	mw.appendOutput("🔄 Peer information refreshed!")
+	mw.appendOutput("✅ SUCCESS\n\n📋 PEER INFORMATION REFRESHED!")
 	mw.appendOutput(mapInfo)
+	mw.appendOutput("\n" + strings.Repeat("─", 50))
 }
 
 func (mw *MainWindow) handleShowVehicles() {
+	mw.clearAndStartOutput("Show Vehicle Count")
+
 	ledger := mw.netManager.GetLedger()
 	vehicleCount := len(ledger.Ledger)
 
 	if vehicleCount == 0 {
-		mw.appendOutput("🚗 No vehicles currently on the map")
+		mw.appendOutput("✅ SUCCESS\n\n📋 VEHICLE STATUS:\n🚗 No vehicles currently on the map")
+		mw.appendOutput("\n" + strings.Repeat("─", 50))
 		return
 	}
 
-	mw.appendOutput(fmt.Sprintf("🚗 %d vehicle(s) on the map:", vehicleCount))
+	mw.appendOutput(fmt.Sprintf("✅ SUCCESS\n\n📋 VEHICLE STATUS:\n🚗 %d vehicle(s) on the map:\n", vehicleCount))
 
 	for peerID, entry := range ledger.Ledger {
 		pos := entry.VehicleState.Position
@@ -291,32 +297,42 @@ func (mw *MainWindow) handleShowVehicles() {
 		if len(peerID) > 12 {
 			shortID = peerID[:12] + "..."
 		}
-		mw.appendOutput(fmt.Sprintf("  • %s at (%.2f, %.2f)", shortID, pos.Lat, pos.Lng))
+		mw.appendOutput(fmt.Sprintf("  🔹 %s at (%.2f, %.2f)", shortID, pos.Lat, pos.Lng))
 	}
+	mw.appendOutput("\n" + strings.Repeat("─", 50))
 }
 
 // Utility methods
 
-func (mw *MainWindow) displayCommandResult(command string, result commands.CommandResult) {
+func (mw *MainWindow) clearAndStartOutput(command string) {
+	// Clear output and show command header with vibrant formatting
 	timestamp := time.Now().Format("15:04:05")
-	status := "✅"
+	header := fmt.Sprintf("🔥 [%s] %s\n%s\n", timestamp, command, strings.Repeat("=", len(command)+20))
+	mw.outputText.SetText(header)
+}
+
+func (mw *MainWindow) displayCommandResult(command string, result commands.CommandResult) {
+	// Clear output first
+	mw.clearAndStartOutput(command)
+
+	status := "✅ SUCCESS"
 	if !result.Success {
-		status = "❌"
+		status = "❌ FAILED"
 	}
 
-	output := fmt.Sprintf("**[%s] %s %s:**\n%s\n", timestamp, status, command, result.Message)
+	output := fmt.Sprintf("%s\n\n📋 RESULT:\n%s\n", status, result.Message)
 	if result.Error != nil {
-		output += fmt.Sprintf("*Error: %v*\n", result.Error)
+		output += fmt.Sprintf("\n⚠️ ERROR DETAILS:\n%v\n", result.Error)
 	}
-	output += "\n---\n"
+	output += "\n" + strings.Repeat("─", 50) + "\n"
 
 	mw.appendOutput(output)
 }
 
 func (mw *MainWindow) appendOutput(text string) {
 	// Get current content and append new text
-	currentContent := mw.outputText.String()
-	mw.outputText.ParseMarkdown(currentContent + text + "\n")
+	currentContent := mw.outputText.Text
+	mw.outputText.SetText(currentContent + text + "\n")
 }
 
 // Run starts the UI application
@@ -358,48 +374,63 @@ func (mw *MainWindow) startMapUpdates() {
 // Demo handler methods
 
 func (mw *MainWindow) handleDemoNoV2V() {
+	mw.clearAndStartOutput("Demo: No V2V Communication")
+
 	if mw.demoScenario.IsRunning() {
-		mw.appendOutput("❗ Demo already running. Stop current demo first.")
+		mw.appendOutput("❌ FAILED\n\n⚠️ ERROR:\nDemo already running. Stop current demo first.")
+		mw.appendOutput("\n" + strings.Repeat("─", 50))
 		return
 	}
 
 	err := mw.demoScenario.StartScenario(demo.NoV2V)
 	if err != nil {
-		mw.appendOutput(fmt.Sprintf("❌ Failed to start demo: %v", err))
+		mw.appendOutput(fmt.Sprintf("❌ FAILED\n\n⚠️ ERROR:\nFailed to start demo: %v", err))
+		mw.appendOutput("\n" + strings.Repeat("─", 50))
 		return
 	}
 
-	mw.appendOutput("🚨 Starting Emergency Demo WITHOUT V2V Communication")
+	mw.appendOutput("✅ SUCCESS\n\n🚨 STARTING EMERGENCY DEMO WITHOUT V2V COMMUNICATION")
 	mw.appendOutput("➡️ Normal car ahead, ambulance behind - no communication")
 	mw.appendOutput("⚠️ Ambulance will be stuck behind normal car...")
+	mw.appendOutput("\n🎬 Demo is now running... Watch the map!")
+	mw.appendOutput("\n" + strings.Repeat("─", 50))
 
 	// Start monitoring demo progress
 	go mw.monitorDemoProgress()
 }
 
 func (mw *MainWindow) handleDemoWithV2V() {
+	mw.clearAndStartOutput("Demo: With V2V Communication")
+
 	if mw.demoScenario.IsRunning() {
-		mw.appendOutput("❗ Demo already running. Stop current demo first.")
+		mw.appendOutput("❌ FAILED\n\n⚠️ ERROR:\nDemo already running. Stop current demo first.")
+		mw.appendOutput("\n" + strings.Repeat("─", 50))
 		return
 	}
 
 	err := mw.demoScenario.StartScenario(demo.WithV2V)
 	if err != nil {
-		mw.appendOutput(fmt.Sprintf("❌ Failed to start demo: %v", err))
+		mw.appendOutput(fmt.Sprintf("❌ FAILED\n\n⚠️ ERROR:\nFailed to start demo: %v", err))
+		mw.appendOutput("\n" + strings.Repeat("─", 50))
 		return
 	}
 
-	mw.appendOutput("📡 Starting Emergency Demo WITH V2V Communication")
+	mw.appendOutput("✅ SUCCESS\n\n📡 STARTING EMERGENCY DEMO WITH V2V COMMUNICATION")
 	mw.appendOutput("➡️ Normal car ahead, ambulance behind - V2V enabled")
 	mw.appendOutput("🚗 Car will receive ambulance alert and move aside...")
+	mw.appendOutput("\n🎬 Demo is now running... Watch the map!")
+	mw.appendOutput("\n" + strings.Repeat("─", 50))
 
 	// Start monitoring demo progress
 	go mw.monitorDemoProgress()
 }
 
 func (mw *MainWindow) handleStopDemo() {
+	mw.clearAndStartOutput("Stop Demo")
+
 	if !mw.demoScenario.IsRunning() {
-		mw.appendOutput("❗ No demo currently running.")
+		mw.appendOutput("❌ FAILED\n\n⚠️ ERROR:\nNo demo currently running.")
+		mw.appendOutput("\n" + strings.Repeat("─", 50))
 		return
 	}
 
@@ -407,7 +438,8 @@ func (mw *MainWindow) handleStopDemo() {
 	if result != nil {
 		mw.displayDemoResult(result)
 	} else {
-		mw.appendOutput("⏹️ Demo stopped.")
+		mw.appendOutput("✅ SUCCESS\n\n⏹️ Demo stopped successfully.")
+		mw.appendOutput("\n" + strings.Repeat("─", 50))
 	}
 }
 
@@ -441,9 +473,11 @@ func (mw *MainWindow) monitorDemoProgress() {
 
 // displayDemoResult shows the results of a completed demo
 func (mw *MainWindow) displayDemoResult(result *demo.ScenarioResult) {
-	mw.appendOutput("\n" + strings.Repeat("=", 50))
-	mw.appendOutput("📊 DEMO RESULTS")
-	mw.appendOutput(strings.Repeat("=", 50))
+	// Clear output and show demo results header
+	mw.clearAndStartOutput("Demo Results")
+
+	mw.appendOutput("✅ SUCCESS\n\n📊 DEMO COMPLETED - RESULTS:")
+	mw.appendOutput(strings.Repeat("═", 50))
 
 	scenarioName := "Without V2V Communication"
 	if result.ScenarioType == demo.WithV2V {
@@ -467,7 +501,7 @@ func (mw *MainWindow) displayDemoResult(result *demo.ScenarioResult) {
 	}
 
 	mw.appendOutput(fmt.Sprintf("🏥 Patient Outcome: %s", result.PatientOutcome))
-	mw.appendOutput(strings.Repeat("=", 50))
+	mw.appendOutput(strings.Repeat("═", 50))
 
 	// Add comparison hint
 	if result.ScenarioType == demo.NoV2V {
@@ -475,6 +509,7 @@ func (mw *MainWindow) displayDemoResult(result *demo.ScenarioResult) {
 	} else {
 		mw.appendOutput("💡 Compare with 'Demo: No V2V' to see the improvement!")
 	}
+	mw.appendOutput("\n" + strings.Repeat("─", 50))
 }
 
 // Close gracefully shuts down the UI
